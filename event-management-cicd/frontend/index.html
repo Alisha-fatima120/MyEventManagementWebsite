@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campus Events Hub</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e; --bad:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:32px 20px; text-align:center; border-bottom:1px solid #334155; }
+  header h1 { margin:0 0 6px; font-size:2rem; }
+  header p { margin:0; color:var(--muted); }
+  main { max-width:1000px; margin:0 auto; padding:24px 16px 60px; }
+  h2 { margin:28px 0 12px; font-size:1.2rem; color:var(--accent); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:16px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:8px; }
+  .card h3 { margin:0; }
+  .meta { color:var(--muted); font-size:.85rem; }
+  .badge { display:inline-block; background:#0b3b52; color:var(--accent); padding:2px 8px; border-radius:99px; font-size:.75rem; width:fit-content; }
+  button { background:var(--accent); color:#04202e; border:0; padding:8px 12px; border-radius:8px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid #475569; }
+  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; }
+  form { background:var(--card); padding:16px; border-radius:12px; display:grid; gap:10px; }
+  input, textarea { width:100%; padding:9px 10px; border-radius:8px; border:1px solid #475569; background:#0f172a; color:var(--text); font:inherit; }
+  dialog { background:var(--card); color:var(--text); border:1px solid #475569; border-radius:12px; width:min(420px,92vw); }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  #msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--card); border:1px solid #475569; padding:10px 16px; border-radius:8px; display:none; }
+  ul { padding-left:18px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Campus Events Hub</h1>
+  <p>Nescon &bull; Execup &bull; VisioSpark &bull; ACM Hackathon</p>
+</header>
+
+<main>
+  <h2>Upcoming Events</h2>
+  <div id="events" class="grid"><p class="meta">Loading...</p></div>
+
+  <h2>Add a New Event</h2>
+  <form id="addForm">
+    <input name="name" placeholder="Event name" required>
+    <textarea name="description" rows="2" placeholder="Short description"></textarea>
+    <input name="event_date" type="date">
+    <input name="venue" placeholder="Venue">
+    <button type="submit">Add Event</button>
+  </form>
+</main>
+
+<dialog id="regDialog">
+  <form id="regForm" method="dialog">
+    <h3 id="regTitle">Register</h3>
+    <input name="name" placeholder="Your name" required>
+    <input name="email" type="email" placeholder="Your email" required>
+    <div class="row">
+      <button type="submit">Register</button>
+      <button type="button" class="ghost" id="regCancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="listDialog">
+  <h3 id="listTitle">Registrations</h3>
+  <ul id="listBody"></ul>
+  <button class="ghost" id="listClose">Close</button>
+</dialog>
+
+<div id="msg"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentEvent = null;
+
+function toast(text) {
+  const m = $('msg'); m.textContent = text; m.style.display = 'block';
+  setTimeout(() => (m.style.display = 'none'), 2500);
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+async function loadEvents() {
+  try {
+    const res = await fetch('/api/events');
+    const events = await res.json();
+    $('events').innerHTML = events.length ? '' : '<p class="meta">No events yet.</p>';
+    events.forEach((e) => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML = `
+        <span class="badge">${e.registrations} registered</span>
+        <h3>${esc(e.name)}</h3>
+        <div class="meta">${esc(e.event_date)} &middot; ${esc(e.venue)}</div>
+        <div>${esc(e.description)}</div>
+        <div class="row">
+          <button data-act="reg">Register</button>
+          <button class="ghost" data-act="list">Attendees</button>
+          <button class="danger" data-act="del">Delete</button>
+        </div>`;
+      el.querySelector('[data-act=reg]').onclick = () => { currentEvent = e; $('regTitle').textContent = 'Register for ' + e.name; $('regDialog').showModal(); };
+      el.querySelector('[data-act=list]').onclick = () => showList(e);
+      el.querySelector('[data-act=del]').onclick = () => delEvent(e);
+      $('events').appendChild(el);
+    });
+  } catch (err) {
+    $('events').innerHTML = '<p class="meta">Could not load events.</p>';
+  }
+}
+
+async function showList(e) {
+  const res = await fetch(`/api/events/${e.id}/registrations`);
+  const rows = await res.json();
+  $('listTitle').textContent = e.name + ' - Attendees';
+  $('listBody').innerHTML = rows.length ? rows.map((r) => `<li>${esc(r.name)} (${esc(r.email)})</li>`).join('') : '<li>No registrations yet</li>';
+  $('listDialog').showModal();
+}
+
+async function delEvent(e) {
+  if (!confirm('Delete ' + e.name + '?')) return;
+  await fetch('/api/events/' + e.id, { method: 'DELETE' });
+  toast('Event deleted'); loadEvents();
+}
+
+$('addForm').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const body = Object.fromEntries(new FormData(ev.target));
+  const res = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (res.ok) { ev.target.reset(); toast('Event added'); loadEvents(); } else toast('Failed to add event');
+};
+
+$('regForm').onsubmit = async (ev) => {
+  const body = Object.fromEntries(new FormData(ev.target));
+  const res = await fetch(`/api/events/${currentEvent.id}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  ev.target.reset();
+  toast(res.ok ? 'Registered successfully' : 'Registration failed');
+  loadEvents();
+};
+
+$('regCancel').onclick = () => $('regDialog').close();
+$('listClose').onclick = () => $('listDialog').close();
+loadEvents();
+</script>
+</body>
+</html>
